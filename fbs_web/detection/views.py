@@ -86,3 +86,16 @@ def get_run_neighbor_ranked(request, run_id):
     run = get_object_or_404(DetectionRun, id=run_id)
     ranked_path = os.path.join(run.output_dir, "neighbor_ranked.csv")
     return Response({"run_id": run.id, "ranked_neighbors": _load_csv_as_records(ranked_path)})
+
+
+@api_view(["GET"])
+def get_all_runs(request):
+    runs = DetectionRun.objects.all().order_by('-created_at')
+    data = [{
+        "id": r.id,
+        "input_filename": r.input_filename,
+        "total_anomalies": r.total_anomalies,
+        "status": r.status,
+        "created_at": r.created_at.isoformat(),
+    } for r in runs]
+    return Response({"runs": data})

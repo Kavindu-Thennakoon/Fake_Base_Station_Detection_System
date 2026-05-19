@@ -1,0 +1,142 @@
+# ═══════════════════════════════════════════════════════════
+# Fake Base Station Detection System — .gitignore
+# ═══════════════════════════════════════════════════════════
+
+# ─────────────────────────────────────
+# Python
+# ─────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+*.whl
+venv/
+env/
+.venv/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ─────────────────────────────────────
+# ML Models & Output (large files)
+# ─────────────────────────────────────
+ml_service/models/**/*.pkl
+ml_service/models/**/*.joblib
+ml_service/models/**/*.h5
+ml_service/models/**/*.pt
+ml_service/models/**/*.npz
+ml_service/models/**/combined_meta.pkl
+ml_service/models/**/cell_meta/
+ml_service/models/**/training_data/
+ml_service/output/run_*/
+!ml_service/models/.gitkeep
+!ml_service/output/.gitkeep
+
+# ─────────────────────────────────────
+# Data (keep raw samples, ignore large processed files)
+# ─────────────────────────────────────
+ml_service/data/processed/*.csv
+!ml_service/data/processed/.gitkeep
+!ml_service/data/raw/Cell_Details.csv
+
+# ─────────────────────────────────────
+# C++ Build Artifacts
+# ─────────────────────────────────────
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.dylib
+*.so
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+_rrcf_core*.so
+/tmp/rrcf_build/
+
+# ─────────────────────────────────────
+# Node.js / React
+# ─────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/build/
+.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp.*
+.yarn/
+
+# ─────────────────────────────────────
+# Environment & Secrets
+# ─────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+*.pem
+*.key
+*.crt
+
+# ─────────────────────────────────────
+# IDE & OS
+# ─────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# ─────────────────────────────────────
+# Django
+# ─────────────────────────────────────
+db.sqlite3
+db.sqlite3-journal
+backend/staticfiles/
+backend/media/
+*.log
+
+# ─────────────────────────────────────
+# Docker
+# ─────────────────────────────────────
+docker-compose.override.yml
+
+# ─────────────────────────────────────
+# Jupyter Notebook Checkpoints
+# ─────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ─────────────────────────────────────
+# Azure ML
+# ─────────────────────────────────────
+.azureml/
+azureml-models/
+*.amltmp
+
+# ─────────────────────────────────────
+# Coverage & Testing
+# ─────────────────────────────────────
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+*.cover
+*.py,cover
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml

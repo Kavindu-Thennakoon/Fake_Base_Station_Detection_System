@@ -1,28 +1,34 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import Navbar from './components/Navbar';
-import Dashboard from './pages/Dashboard';
-import Upload from './pages/Upload';
-import RunHistory from './pages/RunHistory';
-import RunDetail from './pages/RunDetail';
-import Explainability from './pages/Explainability';
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Sidebar from "./components/Sidebar";
+import Dashboard from "./pages/Dashboard";
+import DetectionRuns from "./pages/DetectionRuns";
+import RunDetail from "./pages/RunDetail";
+import Alerts from "./pages/Alerts";
+import Anomalies from "./pages/Anomalies";
+import AnomalyExplain from "./pages/AnomalyExplain";
+import CellModels from "./pages/CellModels";
+import Analytics from "./pages/Analytics";
+import Training from "./pages/Training";
 
-function App() {
+export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-950 text-white">
-        <Navbar />
-        <main className="max-w-7xl mx-auto px-4 py-6">
+      <div className="flex min-h-screen">
+        <Sidebar />
+        <main className="ml-64 flex-1 p-6 overflow-auto">
           <Routes>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/upload" element={<Upload />} />
-            <Route path="/runs" element={<RunHistory />} />
-            <Route path="/runs/:id" element={<RunDetail />} />
-            <Route path="/runs/:id/explain" element={<Explainability />} />
+            <Route path="/detection" element={<DetectionRuns />} />
+            <Route path="/detection/:id" element={<RunDetail />} />
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/anomalies" element={<Anomalies />} />
+            <Route path="/anomalies/:id" element={<AnomalyExplain />} />
+            <Route path="/cells" element={<CellModels />} />
+            <Route path="/analytics" element={<Analytics />} />
+            <Route path="/training" element={<Training />} />
           </Routes>
         </main>
       </div>
     </BrowserRouter>
   );
 }
-
-export default App;

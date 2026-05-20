@@ -76,6 +76,10 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',  # Open for dev, lock down later
     ],
+    
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+        "PAGE_SIZE": 50,
+
 }
 
 # ===== CORS (Allow React frontend) =====
@@ -83,6 +87,11 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",     # Vite React dev server
     "http://127.0.0.1:5173",
 ]
+
+
+# Set to False when ml_service scripts are available on this machine
+ML_DEMO_MODE = True
+
 
 # ===== ML SERVICE PATHS =====
 ML_SERVICE_DIR = os.path.join(BASE_DIR, '..', 'ml_service')

@@ -7,8 +7,10 @@ import {
   Radio,
   BarChart3,
   Brain,
-  Settings,
+  LogOut,
+  User,
 } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
 
 const links = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
@@ -21,6 +23,8 @@ const links = [
 ];
 
 export default function Sidebar() {
+  const { user, logout } = useAuth();
+
   return (
     <aside className="fixed left-0 top-0 h-screen w-64 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col z-50">
       {/* Logo */}
@@ -61,8 +65,28 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="p-4 border-t border-[var(--border-color)]">
+      {/* User & Logout */}
+      <div className="p-4 border-t border-[var(--border-color)] space-y-3">
+        {user && (
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-[var(--accent-blue)]/20 flex items-center justify-center">
+              <User size={16} className="text-[var(--accent-blue)]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white truncate">{user.username}</p>
+              <p className="text-xs text-[var(--text-secondary)] truncate capitalize">
+                {user.profile?.role || "analyst"}
+              </p>
+            </div>
+          </div>
+        )}
+        <button
+          onClick={logout}
+          className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm text-[var(--text-secondary)] hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
+        >
+          <LogOut size={16} />
+          Sign out
+        </button>
         <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
           <div className="w-2 h-2 rounded-full bg-[var(--accent-green)] animate-pulse" />
           System Online

@@ -7,6 +7,7 @@ from detection.views import (
     CellModelViewSet,
     AnomalyViewSet,
     model_status,
+    neighbor_risk_profile,
 )
 
 router = DefaultRouter()
@@ -18,4 +19,9 @@ router.register(r"anomalies", AnomalyViewSet, basename="anomalies")
 urlpatterns = [
     path("", include(router.urls)),
     path("model-status/", model_status, name="model-status"),
+    path(
+        "neighbors/<str:neighbor_id>/risk-profile/",
+        neighbor_risk_profile,
+        name="neighbor-risk-profile",
+    ),
 ]

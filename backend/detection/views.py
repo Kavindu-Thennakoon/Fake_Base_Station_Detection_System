@@ -278,3 +278,14 @@ def model_status(request):
     bridge = MLBridge()
     result = bridge.get_model_status()
     return Response(result)
+
+
+@api_view(["GET"])
+def neighbor_risk_profile(request, neighbor_id):
+    """
+    GET /api/detection/neighbors/{neighbor_id}/risk-profile/
+    Returns cross-run risk profile for a specific neighbor cell.
+    """
+    svc = ExplainabilityService()
+    result = svc.get_neighbor_risk_profile(neighbor_id)
+    return Response(result)

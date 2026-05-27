@@ -12,7 +12,9 @@ from detection.models import (
     DetectionRun,
     Anomaly,
     CellModel,
+    CellLocation,
     SuspiciousNeighbor,
+    NeighborAnomalyDetail,
 )
 from alerts.models import Alert
 
@@ -143,3 +145,113 @@ def recent_activity(request):
         })
 
     return Response(data)
+
+
+@api_view(["GET"])
+def geographic_heatmap(request):
+    """
+    GET /api/analytics/geographic/
+    Returns cell locations with anomaly counts and risk levels for map visualization.
+    Optional ?run_id= to filter by specific detection run.
+    """
+    run_id = request.query_params.get("run_id")
+
+    locations = CellLocation.objects.all()
+    if not locations.exists():
+        return Response([])
+
+    anomaly_qs = Anomaly.objects.all()
+    suspicious_qs = SuspiciousNeighbor.objects.all()
+    if run_id:
+        anomaly_qs = anomaly_qs.filter(run__run_id=run_id)
+        suspicious_qs = suspicious_qs.filter(run__run_id=run_id)
+
+    serving_anomaly_counts = dict(
+        anomaly_qs
+        .values_list("serving_cell_id")
+        .annotate(count=Count("id"))
+        .values_list("serving_cell_id", "count")
+    )
+
+    neighbor_scores = dict(
+        suspicious_qs
+        .values("neighbor_id")
+        .annotate(total_score=Sum("sum_score"), total_occ=Sum("occurrence_count"))
+        .values_list("neighbor_id", "total_score")
+    )
+
+    result = []
+    for loc in locations:
+        cid = loc.global_cell_id
+        anomaly_count = serving_anomaly_counts.get(cid, 0)
+        suspicion_score = neighbor_scores.get(cid, 0) or 0
+
+        if suspicion_score >= 50 or anomaly_count >= 30:
+            risk = "critical"
+        elif suspicion_score >= 20 or anomaly_count >= 15:
+            risk = "high"
+        elif suspicion_score >= 5 or anomaly_count >= 5:
+            risk = "medium"
+        elif anomaly_count > 0 or suspicion_score > 0:
+            risk = "low"
+        else:
+            risk = "normal"
+
+        result.append({
+            "cell_id": cid,
+            "cell_name": loc.cell_name,
+            "latitude": loc.latitude,
+            "longitude": loc.longitude,
+            "technology": loc.technology,
+            "band": loc.band,
+            "anomaly_count": anomaly_count,
+            "suspicion_score": round(suspicion_score, 2),
+            "risk_level": risk,
+        })
+
+    return Response(result)
+
+
+@api_view(["GET"])
+def cell_anomaly_map(request):
+    """
+    GET /api/analytics/cell-anomaly-map/?run_id=...
+    Returns individual anomaly events with locations for detailed map markers.
+    """
+    run_id = request.query_params.get("run_id")
+    if not run_id:
+        latest = DetectionRun.objects.filter(status="completed").first()
+        if not latest:
+            return Response([])
+        run_id = latest.run_id
+
+    anomalies = (
+        Anomaly.objects
+        .filter(run__run_id=run_id)
+        .select_related("run")[:200]
+    )
+
+    loc_map = {
+        loc.global_cell_id: loc
+        for loc in CellLocation.objects.all()
+    }
+
+    result = []
+    for a in anomalies:
+        loc = loc_map.get(a.serving_cell_id)
+        if not loc:
+            continue
+        result.append({
+            "anomaly_id": a.id,
+            "serving_cell_id": a.serving_cell_id,
+            "latitude": loc.latitude,
+            "longitude": loc.longitude,
+            "datetime": a.datetime_raw.isoformat() if a.datetime_raw else None,
+            "avg_codisp": round(a.avg_codisp, 4),
+            "threshold": round(a.threshold, 4),
+            "rrcf_flagged": a.rrcf_flagged,
+            "zscore_flagged": a.zscore_flagged,
+            "detection_method": a.detection_method,
+        })
+
+    return Response(result)

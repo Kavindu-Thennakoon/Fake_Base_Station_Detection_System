@@ -7,6 +7,7 @@ import {
   Radio,
   BarChart3,
   Brain,
+  MapPin,
   LogOut,
   User,
 } from "lucide-react";
@@ -18,6 +19,7 @@ const links = [
   { to: "/alerts", icon: AlertTriangle, label: "Alerts" },
   { to: "/anomalies", icon: Shield, label: "Anomalies" },
   { to: "/cells", icon: Radio, label: "Cell Models" },
+  { to: "/map", icon: MapPin, label: "Map" },
   { to: "/analytics", icon: BarChart3, label: "Analytics" },
   { to: "/training", icon: Brain, label: "Training" },
 ];

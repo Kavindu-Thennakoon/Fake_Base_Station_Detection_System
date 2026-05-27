@@ -87,4 +87,19 @@ export const changePassword = (data) => api.post("/accounts/change-password/", d
 export const getNeighborRiskProfile = (neighborId) =>
   api.get(`/detection/neighbors/${neighborId}/risk-profile/`);
 
+// ── File Upload ──
+export const uploadCSV = (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  return api.post("/detection/upload/", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
+
+// ── Geographic Map ──
+export const getGeographicHeatmap = (runId) =>
+  api.get("/analytics/geographic/", { params: runId ? { run_id: runId } : {} });
+export const getCellAnomalyMap = (runId) =>
+  api.get("/analytics/cell-anomaly-map/", { params: runId ? { run_id: runId } : {} });
+
 export default api;

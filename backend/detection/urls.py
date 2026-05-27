@@ -8,6 +8,7 @@ from detection.views import (
     AnomalyViewSet,
     model_status,
     neighbor_risk_profile,
+    upload_csv,
 )
 
 router = DefaultRouter()
@@ -24,4 +25,5 @@ urlpatterns = [
         neighbor_risk_profile,
         name="neighbor-risk-profile",
     ),
+    path("upload/", upload_csv, name="upload-csv"),
 ]

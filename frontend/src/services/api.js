@@ -5,6 +5,27 @@ const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Token ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem("token");
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+    }
+    return Promise.reject(err);
+  },
+);
+
 // ── Detection Runs ──
 export const getDetectionRuns = () => api.get("/detection/runs/");
 export const getDetectionRun = (id) => api.get(`/detection/runs/${id}/`);
@@ -32,6 +53,8 @@ export const getAnomalyExplanation = (id) =>
 
 // ── Cell Models ──
 export const getCellModels = () => api.get("/detection/cells/");
+export const getCellModel = (cellId) =>
+  api.get(`/detection/cells/${cellId}/`);
 export const getCellProfile = (cellId) =>
   api.get(`/detection/cells/${cellId}/profile/`);
 export const getModelStatus = () => api.get("/detection/model-status/");
@@ -54,5 +77,31 @@ export const getCellRiskRanking = (top) =>
 export const getMethodBreakdown = (runId) =>
   api.get("/analytics/method-breakdown/", { params: { run_id: runId } });
 export const getRecentActivity = () => api.get("/analytics/recent-activity/");
+
+// ── Auth ──
+export const loginUser = (data) => api.post("/accounts/login/", data);
+export const logoutUser = () => api.post("/accounts/logout/");
+export const getCurrentUser = () => api.get("/accounts/me/");
+export const registerUser = (data) => api.post("/accounts/register/", data);
+export const changePassword = (data) => api.post("/accounts/change-password/", data);
+
+// ── Neighbor Risk Profile ──
+export const getNeighborRiskProfile = (neighborId) =>
+  api.get(`/detection/neighbors/${neighborId}/risk-profile/`);
+
+// ── File Upload ──
+export const uploadCSV = (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  return api.post("/detection/upload/", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
+
+// ── Geographic Map ──
+export const getGeographicHeatmap = (runId) =>
+  api.get("/analytics/geographic/", { params: runId ? { run_id: runId } : {} });
+export const getCellAnomalyMap = (runId) =>
+  api.get("/analytics/cell-anomaly-map/", { params: runId ? { run_id: runId } : {} });
 
 export default api;

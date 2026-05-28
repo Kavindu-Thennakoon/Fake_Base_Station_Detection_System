@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Brain, Play, RefreshCw } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import LoadingSpinner from "../components/LoadingSpinner";
+import FileUpload from "../components/FileUpload";
 import { getTrainingRuns, triggerTraining } from "../services/api";
 
 export default function Training() {
@@ -103,8 +104,13 @@ export default function Training() {
             <h2 className="text-lg font-bold text-white mb-4">Trigger Training Run</h2>
             <div className="space-y-4">
               <div>
-                <label className="text-sm text-[var(--text-secondary)] block mb-1">Training Data File *</label>
-                <input type="text" value={formData.train_file} onChange={(e) => setFormData({ ...formData, train_file: e.target.value })} placeholder="e.g. demo_train.csv" className="w-full px-3 py-2 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-color)] text-white text-sm focus:outline-none focus:border-[var(--accent-purple)]" />
+                <label className="text-sm text-[var(--text-secondary)] block mb-1.5">Training Data File *</label>
+                <FileUpload
+                  accentColor="var(--accent-purple)"
+                  onUploaded={(data) =>
+                    setFormData({ ...formData, train_file: data?.file_path || "" })
+                  }
+                />
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>

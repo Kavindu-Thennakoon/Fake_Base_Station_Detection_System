@@ -256,6 +256,29 @@ class DetectedWindow(models.Model):
         return f"Window {self.neighbor_id} ({self.event_count} events)"
 
 
+class CellLocation(models.Model):
+    """Geographic location of a cell tower for map visualization."""
+
+    TECHNOLOGY_CHOICES = [
+        ("LTE", "LTE"),
+        ("5G-NR", "5G NR"),
+        ("3G", "3G"),
+    ]
+
+    global_cell_id = models.CharField(max_length=50, unique=True, db_index=True)
+    cell_name = models.CharField(max_length=200, blank=True, default="")
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    technology = models.CharField(max_length=10, choices=TECHNOLOGY_CHOICES, default="LTE")
+    band = models.CharField(max_length=20, blank=True, default="")
+
+    class Meta:
+        ordering = ["global_cell_id"]
+
+    def __str__(self):
+        return f"{self.global_cell_id} ({self.latitude:.4f}, {self.longitude:.4f})"
+
+
 class AbnormalNeighbor(models.Model):
     """
     Window-filtered summary from abnormal_neighbors.csv.

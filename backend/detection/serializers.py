@@ -143,3 +143,15 @@ class AbnormalNeighborSerializer(serializers.ModelSerializer):
     class Meta:
         model = AbnormalNeighbor
         fields = "__all__"
+
+
+class CSVUploadSerializer(serializers.Serializer):
+    file = serializers.FileField()
+
+    def validate_file(self, value):
+        if not value.name.endswith(".csv"):
+            raise serializers.ValidationError("Only CSV files are accepted.")
+        max_size = 500 * 1024 * 1024  # 500 MB
+        if value.size > max_size:
+            raise serializers.ValidationError("File too large. Max 500 MB.")
+        return value

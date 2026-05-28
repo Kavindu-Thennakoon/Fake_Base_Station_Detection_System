@@ -1,5 +1,10 @@
+import os
+import csv
+
+from django.conf import settings
 from rest_framework import viewsets, status
-from rest_framework.decorators import action, api_view
+from rest_framework.decorators import action, api_view, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 
@@ -23,6 +28,7 @@ from detection.serializers import (
     SuspiciousNeighborSerializer,
     DetectedWindowSerializer,
     AbnormalNeighborSerializer,
+    CSVUploadSerializer,
 )
 from detection.services.ml_bridge import MLBridge
 from detection.services.explainability import ExplainabilityService
@@ -278,3 +284,71 @@ def model_status(request):
     bridge = MLBridge()
     result = bridge.get_model_status()
     return Response(result)
+
+
+@api_view(["GET"])
+def neighbor_risk_profile(request, neighbor_id):
+    """
+    GET /api/detection/neighbors/{neighbor_id}/risk-profile/
+    Returns cross-run risk profile for a specific neighbor cell.
+    """
+    svc = ExplainabilityService()
+    result = svc.get_neighbor_risk_profile(neighbor_id)
+    return Response(result)
+
+
+EXPECTED_MR_HEADERS = {
+    "serving_cell_id", "datetime_raw", "neighbor_id", "rsrp", "rsrq",
+}
+
+
+@api_view(["POST"])
+@parser_classes([MultiPartParser, FormParser])
+def upload_csv(request):
+    """
+    POST /api/detection/upload/
+    Upload a CSV file for detection or training.
+    Validates CSV headers, saves to MEDIA_ROOT/uploads/, returns file path + row count.
+    """
+    ser = CSVUploadSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+
+    uploaded = ser.validated_data["file"]
+
+    upload_dir = os.path.join(settings.MEDIA_ROOT, "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    dest_path = os.path.join(upload_dir, uploaded.name)
+    counter = 1
+    base, ext = os.path.splitext(uploaded.name)
+    while os.path.exists(dest_path):
+        dest_path = os.path.join(upload_dir, f"{base}_{counter}{ext}")
+        counter += 1
+
+    with open(dest_path, "wb") as f:
+        for chunk in uploaded.chunks():
+            f.write(chunk)
+
+    row_count = 0
+    headers = []
+    try:
+        with open(dest_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.reader(f)
+            headers = [h.strip().lower() for h in next(reader, [])]
+            for _ in reader:
+                row_count += 1
+    except Exception:
+        pass
+
+    header_set = set(headers)
+    missing = EXPECTED_MR_HEADERS - header_set
+    has_expected = len(missing) == 0
+
+    return Response({
+        "file_path": dest_path,
+        "file_name": os.path.basename(dest_path),
+        "row_count": row_count,
+        "headers": headers,
+        "headers_valid": has_expected,
+        "missing_headers": sorted(missing) if missing else [],
+    }, status=status.HTTP_201_CREATED)

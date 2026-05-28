@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Play, RefreshCw, Search, ChevronRight } from "lucide-react";
 import StatusBadge from "../components/StatusBadge";
 import LoadingSpinner from "../components/LoadingSpinner";
+import FileUpload from "../components/FileUpload";
 import { getDetectionRuns, triggerDetection } from "../services/api";
 
 export default function DetectionRuns() {
@@ -139,13 +140,12 @@ export default function DetectionRuns() {
             <h2 className="text-lg font-bold text-white mb-4">Trigger Detection Run</h2>
             <div className="space-y-4">
               <div>
-                <label className="text-sm text-[var(--text-secondary)] block mb-1">MR Data File Path *</label>
-                <input
-                  type="text"
-                  value={formData.check_file}
-                  onChange={(e) => setFormData({ ...formData, check_file: e.target.value })}
-                  placeholder="e.g. demo_data.csv"
-                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-color)] text-white text-sm focus:outline-none focus:border-[var(--accent-blue)]"
+                <label className="text-sm text-[var(--text-secondary)] block mb-1.5">MR Data File *</label>
+                <FileUpload
+                  accentColor="var(--accent-blue)"
+                  onUploaded={(data) =>
+                    setFormData({ ...formData, check_file: data?.file_path || "" })
+                  }
                 />
               </div>
               <div className="grid grid-cols-3 gap-3">

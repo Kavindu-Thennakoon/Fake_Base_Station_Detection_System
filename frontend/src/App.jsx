@@ -13,6 +13,7 @@ import CellModels from "./pages/CellModels";
 import Analytics from "./pages/Analytics";
 import Training from "./pages/Training";
 import MapPage from "./pages/MapPage";
+import CellDetail from "./pages/CellDetail";
 
 function AppLayout() {
   return (
@@ -27,6 +28,7 @@ function AppLayout() {
           <Route path="/anomalies" element={<Anomalies />} />
           <Route path="/anomalies/:id" element={<AnomalyExplain />} />
           <Route path="/cells" element={<CellModels />} />
+          <Route path="/cells/:cellId" element={<CellDetail />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/training" element={<Training />} />

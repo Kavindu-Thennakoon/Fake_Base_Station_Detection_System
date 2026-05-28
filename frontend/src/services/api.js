@@ -53,6 +53,8 @@ export const getAnomalyExplanation = (id) =>
 
 // ── Cell Models ──
 export const getCellModels = () => api.get("/detection/cells/");
+export const getCellModel = (cellId) =>
+  api.get(`/detection/cells/${cellId}/`);
 export const getCellProfile = (cellId) =>
   api.get(`/detection/cells/${cellId}/profile/`);
 export const getModelStatus = () => api.get("/detection/model-status/");

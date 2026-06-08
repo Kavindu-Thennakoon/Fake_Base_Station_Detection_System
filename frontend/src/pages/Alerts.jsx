@@ -171,10 +171,10 @@ export default function Alerts() {
                       <div className="space-y-4">
                         <div className="flex items-center gap-3">
                           <Link
-                            to={`/anomalies?cell_id=${alert.neighbor_id}`}
+                            to={`/neighbors/${alert.neighbor_id}`}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/10 text-purple-400 text-xs font-medium hover:bg-purple-500/20 transition"
                           >
-                            <Search size={14} /> Investigate Anomalies
+                            <Search size={14} /> Investigate Neighbor
                           </Link>
                           <Link
                             to={`/cells/${alert.neighbor_id}`}

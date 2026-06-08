@@ -89,6 +89,12 @@ export const changePassword = (data) => api.post("/accounts/change-password/", d
 export const getNeighborRiskProfile = (neighborId) =>
   api.get(`/detection/neighbors/${neighborId}/risk-profile/`);
 
+// ── Suspicious Neighbors ──
+export const getSuspiciousNeighbors = (params) =>
+  api.get("/detection/suspicious-neighbors/", { params });
+export const getNeighborDetail = (neighborId, params) =>
+  api.get(`/detection/neighbors/${neighborId}/detail/`, { params });
+
 // ── File Upload ──
 export const uploadCSV = (file) => {
   const form = new FormData();

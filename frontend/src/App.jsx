@@ -9,6 +9,7 @@ import RunDetail from "./pages/RunDetail";
 import Alerts from "./pages/Alerts";
 import Anomalies from "./pages/Anomalies";
 import AnomalyExplain from "./pages/AnomalyExplain";
+import NeighborDetail from "./pages/NeighborDetail";
 import CellModels from "./pages/CellModels";
 import Analytics from "./pages/Analytics";
 import Training from "./pages/Training";
@@ -27,6 +28,7 @@ function AppLayout() {
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/anomalies" element={<Anomalies />} />
           <Route path="/anomalies/:id" element={<AnomalyExplain />} />
+          <Route path="/neighbors/:neighborId" element={<NeighborDetail />} />
           <Route path="/cells" element={<CellModels />} />
           <Route path="/cells/:cellId" element={<CellDetail />} />
           <Route path="/map" element={<MapPage />} />

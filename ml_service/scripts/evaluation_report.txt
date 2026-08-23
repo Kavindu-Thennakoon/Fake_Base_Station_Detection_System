@@ -1,0 +1,27 @@
+============================================================
+  FBS DETECTION MODEL — EVALUATION REPORT
+  Generated: 2026-08-23 08:21:59
+============================================================
+
+CONFUSION MATRIX:
+                    Predicted Attack  Predicted Normal
+  Actual Attack     TP=651            FN=99
+  Actual Normal     FP=210            TN=4040
+
+OVERALL METRICS:
+  Precision:           0.7561
+  Recall:              0.8680
+  F1-Score:            0.8082
+  Accuracy:            0.9382
+  False Positive Rate: 0.0494
+
+  Total Samples:       5000
+  Total Attacks:       750
+  Total Detected:      861
+
+PER-ATTACK-TYPE RECALL:
+  downgrade                 198/250 detected  (recall=0.7920)
+  imsi_catcher              239/250 detected  (recall=0.9560)
+  neighbor_spoofing         214/250 detected  (recall=0.8560)
+
+============================================================

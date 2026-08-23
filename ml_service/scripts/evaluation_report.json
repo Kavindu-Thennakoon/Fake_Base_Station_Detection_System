@@ -1,0 +1,36 @@
+{
+  "metrics": {
+    "true_positives": 651,
+    "false_positives": 210,
+    "false_negatives": 99,
+    "true_negatives": 4040,
+    "precision": 0.7561,
+    "recall": 0.868,
+    "f1_score": 0.8082,
+    "false_positive_rate": 0.0494,
+    "accuracy": 0.9382,
+    "total_samples": 5000,
+    "total_attacks": 750,
+    "total_detected": 861
+  },
+  "per_attack": {
+    "imsi_catcher": {
+      "total": 250,
+      "detected": 239,
+      "missed": 11,
+      "recall": 0.956
+    },
+    "downgrade": {
+      "total": 250,
+      "detected": 198,
+      "missed": 52,
+      "recall": 0.792
+    },
+    "neighbor_spoofing": {
+      "total": 250,
+      "detected": 214,
+      "missed": 36,
+      "recall": 0.856
+    }
+  }
+}

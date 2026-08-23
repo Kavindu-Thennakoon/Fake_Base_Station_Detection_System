@@ -172,13 +172,15 @@ class MLBridge:
             "python", script,
             "--model-dir", self.model_dir,
             "--check-file", check_file,
-            "--cell-details-file", cell_details,
             "--output-dir", self.output_dir,
             "--threshold-mult", str(threshold_mult),
             "--z-threshold", str(z_threshold),
             "--min-anomaly-score", str(min_anomaly_score),
             "--n-jobs", str(n_jobs),
         ]
+        
+        if os.path.exists(cell_details):
+            cmd.extend(["--cell-details-file", cell_details])
 
         try:
             logger.info("Starting detection: %s", " ".join(cmd))
@@ -252,12 +254,14 @@ class MLBridge:
             "python", script,
             "--train-file", train_file,
             "--model-dir", target_model_dir,
-            "--cell-details-file", cell_details,
             "--num-trees", str(num_trees),
             "--tree-size", str(tree_size),
             "--min-samples", str(min_samples),
             "--n-jobs", str(n_jobs),
         ]
+
+        if os.path.exists(cell_details):
+            cmd.extend(["--cell-details-file", cell_details])
 
         try:
             logger.info("Starting training: %s", " ".join(cmd))

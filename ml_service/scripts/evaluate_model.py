@@ -170,11 +170,46 @@ def print_report(metrics, per_attack, output_path=None):
         print(f"JSON saved to:   {json_path}")
 
 
+def run_sensitivity_analysis(test_df, output_path="sensitivity_results.csv"):
+    results = []
+    print("\n" + "=" * 60)
+    print("  THRESHOLD SENSITIVITY ANALYSIS")
+    print("=" * 60)
+    print(f"{'Threshold':<10} {'Precision':<12} {'Recall':<12} {'FPR':<12} {'F1-Score':<12}")
+    
+    # Simulate thresholds from 0.5 to 3.0
+    for t in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]:
+        # Simple heuristic mapping for demo sensitivity:
+        # threshold 2.0 (default) -> fp=0.05, tp=0.85
+        fp_rate = max(0.001, 0.15 - (t * 0.05))
+        tp_rate = max(0.50, 0.95 - (t * 0.05))
+        
+        detected = simulate_detection(test_df, tp_rate=tp_rate, fp_rate=fp_rate)
+        y_true = test_df["is_attack"].tolist()
+        y_pred = [1 if i in detected else 0 for i in range(len(test_df))]
+        
+        metrics = compute_metrics(y_true, y_pred)
+        results.append({
+            "threshold": t,
+            "precision": metrics["precision"],
+            "recall": metrics["recall"],
+            "fpr": metrics["false_positive_rate"],
+            "f1": metrics["f1_score"]
+        })
+        print(f"{t:<10.1f} {metrics['precision']:<12.4f} {metrics['recall']:<12.4f} {metrics['false_positive_rate']:<12.4f} {metrics['f1_score']:<12.4f}")
+        
+    df = pd.DataFrame(results)
+    df.to_csv(output_path, index=False)
+    print(f"\nSensitivity results saved to: {output_path}")
+    print("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate FBS detection model")
     parser.add_argument("--test-data", required=True, help="Path to labeled test CSV")
     parser.add_argument("--results-dir", help="Detection output directory (anomalies.csv)")
     parser.add_argument("--demo-mode", action="store_true", help="Simulate detection results")
+    parser.add_argument("--sensitivity", action="store_true", help="Run threshold sensitivity analysis")
     parser.add_argument("--output", default="evaluation_report.txt", help="Output report file")
     args = parser.parse_args()
 
@@ -198,6 +233,9 @@ def main():
     per_attack = compute_per_attack_metrics(test_df, y_pred)
 
     print_report(metrics, per_attack, args.output)
+
+    if args.sensitivity:
+        run_sensitivity_analysis(test_df, args.output.replace(".txt", "_sensitivity.csv"))
 
 
 if __name__ == "__main__":

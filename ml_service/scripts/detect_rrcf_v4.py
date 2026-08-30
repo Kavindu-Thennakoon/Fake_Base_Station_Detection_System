@@ -510,7 +510,7 @@ def build_final_abnormal_ids_from_records(rp, sp, ip):
     write_table_with_fallback(sd, sp, "Saved final abnormal ids ({count}) -> {path}", "Fallback -> {path}")
     write_table_with_fallback(io, ip, "Saved ids only ({count}) -> {path}", "Fallback -> {path}")
 
-def apply_neighbor_window_filter(output_dir, window_minutes=30, min_count=10):
+def apply_neighbor_window_filter(output_dir, gap_minutes=10, min_count=20):
     ap = os.path.join(output_dir,'anomalies.csv')
     dp = os.path.join(output_dir,'neighbor_anomaly_details.csv')
     rp = os.path.join(output_dir,'neighbor_ranked.csv')
@@ -532,20 +532,36 @@ def apply_neighbor_window_filter(output_dir, window_minutes=30, min_count=10):
     if v.shape[0]==0:
         for p in [rp]+empty: pd.DataFrame().to_csv(p, index=False)
         return
-    w = pd.Timedelta(minutes=int(window_minutes))
+    gap_td = pd.Timedelta(minutes=int(gap_minutes))
     dw = []; keep = set()
     for nid, sub in v.groupby('neighbor_id', sort=False):
         sub = sub.sort_values('_ts')
         if sub.shape[0] < int(min_count): continue
         ts = sub['_ts'].tolist(); ri = sub['_rid'].tolist()
-        l = 0
-        for r in range(len(ts)):
-            while l<=r and (ts[r]-ts[l])>=w: l+=1
-            c = r-l+1
-            if c>=int(min_count):
-                for ii in range(l,r+1): keep.add(int(ri[ii]))
-                dw.append({'neighbor_id':_safe_str(nid),'window_start':ts[l],'window_end':ts[l]+w,'anomaly_count':c})
-                l+=1
+        if not ts: continue
+        
+        current_session_start = ts[0]
+        current_session_end = ts[0]
+        current_session_count = 1
+        current_session_indices = [ri[0]]
+        
+        for i in range(1, len(ts)):
+            if (ts[i] - current_session_end) <= gap_td:
+                current_session_end = ts[i]
+                current_session_count += 1
+                current_session_indices.append(ri[i])
+            else:
+                if current_session_count >= int(min_count):
+                    for idx in current_session_indices: keep.add(int(idx))
+                    dw.append({'neighbor_id':_safe_str(nid), 'window_start':current_session_start, 'window_end':current_session_end, 'anomaly_count':current_session_count})
+                current_session_start = ts[i]
+                current_session_end = ts[i]
+                current_session_count = 1
+                current_session_indices = [ri[i]]
+                
+        if current_session_count >= int(min_count):
+            for idx in current_session_indices: keep.add(int(idx))
+            dw.append({'neighbor_id':_safe_str(nid), 'window_start':current_session_start, 'window_end':current_session_end, 'anomaly_count':current_session_count})
     filt = det[det['_rid'].isin(keep)].drop(columns=['_rid','_ts'], errors='ignore')
     # ── Save filtered to NEW files, don't overwrite originals ──
     dp_filt = dp.replace('.csv', '_filtered.csv')
@@ -810,7 +826,7 @@ def main():
         except Exception:
             rp_written = os.path.splitext(ix)[0]+'.csv'; pd.DataFrame().to_csv(rp_written, index=False)
     build_final_abnormal_ids_from_records(rp_written, isx, iox)
-    apply_neighbor_window_filter(od, window_minutes=30, min_count=10)
+    apply_neighbor_window_filter(od, gap_minutes=10, min_count=20)
 
     p3t = time.time() - p3
     tt = time.time()-t0

@@ -124,49 +124,42 @@ export default function RunDetail() {
         </div>
       </div>
 
-      {/* Anomalies Table */}
+      {/* Suspicious Neighbors Table */}
       <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-[var(--border-color)]">
-          <h2 className="text-base font-semibold text-white">Anomalies ({anomalies.length})</h2>
+          <h2 className="text-base font-semibold text-white">Suspicious Neighbors ({suspicious.length})</h2>
         </div>
         <table className="w-full">
           <thead>
             <tr className="border-b border-[var(--border-color)]">
-              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">ID</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Cell ID</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">CoDisp</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Threshold</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Method</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Time</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Neighbor ID</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Score</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Occurrences</th>
+              <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Affected Cells</th>
               <th className="px-5 py-3"></th>
             </tr>
           </thead>
           <tbody>
-            {anomalies.slice(0, 20).map((a) => (
-              <tr key={a.id} className="border-b border-[var(--border-color)] hover:bg-[var(--bg-card-hover)] transition-colors">
-                <td className="px-5 py-3 text-sm text-white">#{a.id}</td>
-                <td className="px-5 py-3 text-sm font-mono text-white">{a.serving_cell_id}</td>
-                <td className="px-5 py-3 text-sm text-[var(--accent-red)] font-semibold">{a.avg_codisp?.toFixed(3)}</td>
-                <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">{a.threshold?.toFixed(3)}</td>
-                <td className="px-5 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    a.detection_method === "both" ? "bg-purple-500/20 text-purple-400" :
-                    a.detection_method === "rrcf_only" ? "bg-blue-500/20 text-blue-400" :
-                    "bg-orange-500/20 text-orange-400"
-                  }`}>
-                    {a.detection_method?.replace("_", " ")}
-                  </span>
+            {suspicious.slice(0, 20).map((s) => (
+              <tr key={s.id} className="border-b border-[var(--border-color)] hover:bg-[var(--bg-card-hover)] transition-colors">
+                <td className="px-5 py-3 text-sm font-mono font-semibold text-white">{s.neighbor_id}</td>
+                <td className="px-5 py-3 text-sm text-[var(--accent-red)] font-semibold">
+                  {s.sum_score >= 1000 ? `${(s.sum_score / 1000).toFixed(1)}K` : s.sum_score?.toFixed(2)}
                 </td>
-                <td className="px-5 py-3 text-xs text-[var(--text-secondary)]">
-                  {a.datetime_raw ? new Date(a.datetime_raw).toLocaleString() : "—"}
+                <td className="px-5 py-3 text-sm text-white">{s.occurrence_count}</td>
+                <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
+                  {s.affected_serving_cells?.length || 0} cells
                 </td>
                 <td className="px-5 py-3">
-                  <Link to={`/anomalies/${a.id}`} className="text-[var(--accent-blue)] hover:text-blue-300 text-sm">
-                    Explain →
+                  <Link to={`/neighbors/${s.neighbor_id}`} className="text-[var(--accent-purple)] hover:text-purple-300 text-sm font-medium">
+                    Details →
                   </Link>
                 </td>
               </tr>
             ))}
+            {suspicious.length === 0 && (
+              <tr><td colSpan={5} className="text-center py-12 text-[var(--text-secondary)]">No suspicious neighbors.</td></tr>
+            )}
           </tbody>
         </table>
       </div>

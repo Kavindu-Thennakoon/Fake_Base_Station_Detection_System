@@ -92,7 +92,7 @@ CORS_ALLOWED_ORIGINS = [
 
 
 # Set to False when ml_service scripts are available on this machine
-ML_DEMO_MODE = True
+ML_DEMO_MODE = False
 
 
 # ===== ML SERVICE PATHS =====

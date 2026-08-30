@@ -8,10 +8,12 @@ Modes:
 Set ML_DEMO_MODE=True in settings.py to enable demo mode.
 """
 
+import csv
 import os
 import random
 import subprocess
 import logging
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 import joblib
@@ -170,13 +172,15 @@ class MLBridge:
             "python", script,
             "--model-dir", self.model_dir,
             "--check-file", check_file,
-            "--cell-details-file", cell_details,
             "--output-dir", self.output_dir,
             "--threshold-mult", str(threshold_mult),
             "--z-threshold", str(z_threshold),
             "--min-anomaly-score", str(min_anomaly_score),
             "--n-jobs", str(n_jobs),
         ]
+        
+        if os.path.exists(cell_details):
+            cmd.extend(["--cell-details-file", cell_details])
 
         try:
             logger.info("Starting detection: %s", " ".join(cmd))
@@ -250,12 +254,14 @@ class MLBridge:
             "python", script,
             "--train-file", train_file,
             "--model-dir", target_model_dir,
-            "--cell-details-file", cell_details,
             "--num-trees", str(num_trees),
             "--tree-size", str(tree_size),
             "--min-samples", str(min_samples),
             "--n-jobs", str(n_jobs),
         ]
+
+        if os.path.exists(cell_details):
+            cmd.extend(["--cell-details-file", cell_details])
 
         try:
             logger.info("Starting training: %s", " ".join(cmd))
@@ -298,14 +304,22 @@ class MLBridge:
         return run
 
     # ==================================================================
-    # DEMO — DETECTION (generates realistic fake data)
+    # DEMO — DETECTION (reads uploaded CSV, scores against trained models)
     # ==================================================================
     def _run_detection_demo(
         self, check_file, threshold_mult, z_threshold, min_anomaly_score
     ):
-        """Generate realistic fake detection data directly in DB."""
-        run_id = f"demo_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        """
+        Read the uploaded CSV and run Z-score detection against trained CellModels.
 
+        For each row: look up the serving cell's trained model, compute per-neighbor
+        Z-scores from the baseline stats, and flag rows where any neighbor exceeds
+        min_anomaly_score. RRCF scores are simulated (would need the actual forest).
+        Falls back to synthetic data only if CSV parsing fails.
+        """
+        import math
+
+        run_id = f"demo_run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         run = DetectionRun.objects.create(
             run_id=run_id,
             status="running",
@@ -315,214 +329,312 @@ class MLBridge:
             min_anomaly_score=min_anomaly_score,
         )
 
-        # --- Serving cells (realistic Sri Lankan cell IDs) ---
-        serving_cells = [
-            "41301_12845", "41301_12846", "41301_12847",
-            "41301_33901", "41301_33902", "41301_44510",
-            "41301_44511", "41301_55620", "41301_55621",
-            "41301_66730",
-        ]
-        # Legitimate neighbor cells
-        legit_neighbors = [
-            "41301_12900", "41301_12901", "41301_12902",
-            "41301_33950", "41301_33951", "41301_44560",
-            "41301_44561", "41301_55670", "41301_55671",
-            "41301_66780",
-        ]
-        # Fake base station cell IDs (the FBS!)
-        fbs_cells = ["99999_00001", "99999_00002"]
-
-        base_time = timezone.now() - timedelta(hours=2)
-        anomaly_objects = []
-        neighbor_detail_objects = []
-
-        # --- Generate anomalies ---
-        num_anomalies = random.randint(25, 60)
-        for i in range(num_anomalies):
-            cell = random.choice(serving_cells)
-            dt = base_time + timedelta(minutes=random.randint(0, 120))
-
-            # 60% flagged by both layers, 25% RRCF only, 15% Z-score only
-            roll = random.random()
-            if roll < 0.60:
-                rrcf_flag, zscore_flag = True, True
-            elif roll < 0.85:
-                rrcf_flag, zscore_flag = True, False
-            else:
-                rrcf_flag, zscore_flag = False, True
-
-            mean_c = random.uniform(3.0, 8.0)
-            std_c = random.uniform(1.0, 3.0)
-            threshold = mean_c + threshold_mult * std_c
-
-            if rrcf_flag:
-                avg_codisp = threshold + random.uniform(0.5, 12.0)
-            else:
-                avg_codisp = threshold - random.uniform(0.1, 1.0)
-
-            anomaly_objects.append(
-                Anomaly(
-                    run=run,
-                    serving_cell_id=cell,
-                    row_index=random.randint(1000, 500000),
-                    datetime_raw=dt,
-                    avg_codisp=round(avg_codisp, 4),
-                    threshold=round(threshold, 4),
-                    rrcf_flagged=rrcf_flag,
-                    zscore_flagged=zscore_flag,
-                )
+        try:
+            result = self._detect_from_csv(
+                run, check_file, threshold_mult, z_threshold, min_anomaly_score
             )
-
-        Anomaly.objects.bulk_create(anomaly_objects)
-
-        # Refresh to get IDs
-        created_anomalies = list(
-            Anomaly.objects.filter(run=run).order_by("id")
-        )
-
-        # --- Generate neighbor details for each anomaly ---
-        for anomaly in created_anomalies:
-            # 1-3 legitimate neighbors (normal)
-            num_legit = random.randint(1, 3)
-            for _ in range(num_legit):
-                nbr = random.choice(legit_neighbors)
-                rsrp = random.uniform(-95, -75)
-                rsrq = random.uniform(-12, -6)
-                rsrp_z = random.uniform(-1.5, 1.5)
-                rsrq_z = random.uniform(-1.5, 1.5)
-                score = (rsrp_z**2 + rsrq_z**2) ** 0.5
-
-                neighbor_detail_objects.append(
-                    NeighborAnomalyDetail(
-                        anomaly=anomaly,
-                        serving_cell_id=anomaly.serving_cell_id,
-                        neighbor_id=nbr,
-                        anomaly_score=round(score, 4),
-                        rsrp=round(rsrp, 1),
-                        rsrq=round(rsrq, 1),
-                        rsrp_z=round(rsrp_z, 4),
-                        rsrq_z=round(rsrq_z, 4),
-                    )
-                )
-
-            # 1 FBS neighbor (abnormal signal)
-            if anomaly.zscore_flagged:
-                fbs = random.choice(fbs_cells)
-                rsrp = random.uniform(-55, -44)  # Abnormally strong
-                rsrq = random.uniform(-5, -3)     # Abnormally good
-                rsrp_z = random.uniform(4.0, 8.0)
-                rsrq_z = random.uniform(3.5, 7.0)
-                score = (rsrp_z**2 + rsrq_z**2) ** 0.5
-
-                neighbor_detail_objects.append(
-                    NeighborAnomalyDetail(
-                        anomaly=anomaly,
-                        serving_cell_id=anomaly.serving_cell_id,
-                        neighbor_id=fbs,
-                        anomaly_score=round(score, 4),
-                        rsrp=round(rsrp, 1),
-                        rsrq=round(rsrq, 1),
-                        rsrp_z=round(rsrp_z, 4),
-                        rsrq_z=round(rsrq_z, 4),
-                    )
-                )
-
-        if neighbor_detail_objects:
-            NeighborAnomalyDetail.objects.bulk_create(
-                neighbor_detail_objects, batch_size=1000
+            run.status = "completed"
+            run.completed_at = timezone.now()
+            run.total_rows_scanned = result["rows_scanned"]
+            run.total_anomalies = result["anomalies"]
+            run.total_cells_scanned = result["cells_scanned"]
+            run.output_dir = "DEMO_MODE"
+            run.error_log = (
+                f"Demo detection — parsed {check_file}, scanned {result['rows_scanned']} rows, "
+                f"found {result['anomalies']} anomalies across {result['cells_scanned']} cells."
             )
+            run.save()
+        except Exception as e:
+            logger.exception("CSV detection failed, falling back to synthetic: %s", e)
+            self._detect_synthetic_fallback(run, threshold_mult)
+            run.error_log = f"Demo detection — CSV parse failed ({e}), used synthetic fallback."
+            run.save()
 
-        # --- Suspicious neighbors (ranked) ---
-        all_suspicious = {}
-        for detail in NeighborAnomalyDetail.objects.filter(
-            anomaly__run=run
-        ):
-            if detail.neighbor_id not in all_suspicious:
-                all_suspicious[detail.neighbor_id] = {
-                    "sum_score": 0,
-                    "count": 0,
-                    "cells": set(),
-                }
-            all_suspicious[detail.neighbor_id]["sum_score"] += (
-                detail.anomaly_score
-            )
-            all_suspicious[detail.neighbor_id]["count"] += 1
-            all_suspicious[detail.neighbor_id]["cells"].add(
-                detail.serving_cell_id
-            )
-
-        for nbr_id, data in all_suspicious.items():
-            SuspiciousNeighbor.objects.create(
-                run=run,
-                neighbor_id=nbr_id,
-                sum_score=round(data["sum_score"], 4),
-                occurrence_count=data["count"],
-                affected_serving_cells=sorted(data["cells"]),
-            )
-
-        # --- Detected windows (for FBS cells only) ---
-        for fbs in fbs_cells:
-            fbs_anomalies = [
-                a for a in created_anomalies
-                if a.zscore_flagged
-                and NeighborAnomalyDetail.objects.filter(
-                    anomaly=a, neighbor_id=fbs
-                ).exists()
-            ]
-
-            if len(fbs_anomalies) >= 3:
-                times = sorted(
-                    [a.datetime_raw for a in fbs_anomalies if a.datetime_raw]
-                )
-                if times:
-                    for cell in serving_cells[:3]:
-                        DetectedWindow.objects.create(
-                            run=run,
-                            serving_cell_id=cell,
-                            neighbor_id=fbs,
-                            window_start=times[0],
-                            window_end=times[-1],
-                            event_count=len(fbs_anomalies),
-                        )
-
-        # --- Abnormal neighbors (window-filtered) ---
-        for fbs in fbs_cells:
-            windows = DetectedWindow.objects.filter(run=run, neighbor_id=fbs)
-            if windows.exists():
-                affected_cells = windows.values_list(
-                    "serving_cell_id", flat=True
-                ).distinct()
-                for cell in affected_cells:
-                    cell_windows = windows.filter(serving_cell_id=cell)
-                    total_events = sum(
-                        w.event_count for w in cell_windows
-                    )
-                    AbnormalNeighbor.objects.create(
-                        run=run,
-                        serving_cell_id=cell,
-                        neighbor_id=fbs,
-                        event_count=total_events,
-                        window_count=cell_windows.count(),
-                    )
-
-        # --- Finalize run ---
-        run.status = "completed"
-        run.completed_at = timezone.now()
-        run.total_anomalies = num_anomalies
-        run.total_cells_scanned = len(serving_cells)
-        run.total_rows_scanned = random.randint(100000, 500000)
-        run.output_dir = "DEMO_MODE"
-        run.error_log = "Demo mode — no actual ML pipeline executed."
-        run.save()
-
-        # --- Auto-generate alerts ---
+        self._build_suspicious_neighbors(run)
+        self._build_windows(run)
         self._generate_alerts(run)
 
         logger.info(
             "DEMO detection complete: %s (%d anomalies, %d alerts)",
-            run_id, num_anomalies, run.alerts.count(),
+            run_id, run.total_anomalies, run.alerts.count(),
         )
         return run
+
+    def _detect_from_csv(
+        self, run, check_file, threshold_mult, z_threshold, min_anomaly_score
+    ):
+        """Read CSV, score each row against trained CellModel baselines."""
+        import math
+
+        models = {m.serving_cell_id: m for m in CellModel.objects.all()}
+        if not models:
+            raise ValueError("No trained CellModels in DB — train first")
+
+        with open(check_file, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            header_map = {h.strip().lower(): h for h in (reader.fieldnames or [])}
+
+            serving_col = self._resolve_column("serving_cell_id", header_map)
+            enodeb_col = self._resolve_column("enodebid", header_map)
+            cellid_col = self._resolve_column("cellid", header_map)
+            dt_col = header_map.get("datetime_raw") or header_map.get("time_timestamp")
+
+            nbr_id_cols = [self._resolve_column(f"nbr_cell_{i}_id", header_map) for i in range(1, 5)]
+            nbr_rp_cols = [self._resolve_column(f"nbr_cell_{i}_rsrp", header_map) for i in range(1, 5)]
+            nbr_rq_cols = [self._resolve_column(f"nbr_cell_{i}_rsrq", header_map) for i in range(1, 5)]
+
+            rows_scanned = 0
+            cells_seen = set()
+            anomaly_objs = []
+            detail_objs = []
+            eps = 1e-6
+
+            for row_idx, row in enumerate(reader):
+                rows_scanned += 1
+                sid = self._compute_serving_cell_id(row, serving_col, enodeb_col, cellid_col)
+                if not sid:
+                    continue
+
+                model = models.get(sid)
+                if not model:
+                    continue
+
+                cells_seen.add(sid)
+
+                dt_str = row.get(dt_col, "") if dt_col else ""
+                dt_val = None
+                if dt_str:
+                    try:
+                        from django.utils.dateparse import parse_datetime
+                        dt_val = parse_datetime(dt_str)
+                        if dt_val is None:
+                            dt_val = timezone.make_aware(
+                                datetime.strptime(dt_str.strip(), "%Y-%m-%d %H:%M:%S")
+                            )
+                    except Exception:
+                        dt_val = None
+
+                threshold = model.mean_codisp + threshold_mult * model.std_codisp
+                avg_codisp = random.gauss(model.mean_codisp, model.std_codisp)
+                rrcf_flagged = avg_codisp > threshold
+
+                neighbor_details = []
+                zscore_flagged = False
+
+                for i in range(4):
+                    id_col = nbr_id_cols[i]
+                    rp_col = nbr_rp_cols[i]
+                    rq_col = nbr_rq_cols[i]
+
+                    nid = row.get(id_col, "").strip() if id_col else ""
+                    if not nid or nid in ("", "nan", "NaN"):
+                        continue
+                    nid = nid.split(".")[0]
+
+                    try:
+                        rsrp = float(row.get(rp_col, "")) if rp_col else None
+                    except (ValueError, TypeError):
+                        rsrp = None
+                    try:
+                        rsrq = float(row.get(rq_col, "")) if rq_col else None
+                    except (ValueError, TypeError):
+                        rsrq = None
+
+                    stats = model.neighbor_stats.get(nid, {})
+                    rsrp_z = 0.0
+                    rsrq_z = 0.0
+
+                    if rsrp is not None and stats.get("rsrp_mean") is not None:
+                        std = stats.get("rsrp_std", 0) or eps
+                        rsrp_z = abs(rsrp - stats["rsrp_mean"]) / (std + eps)
+
+                    if rsrq is not None and stats.get("rsrq_mean") is not None:
+                        std = stats.get("rsrq_std", 0) or eps
+                        rsrq_z = abs(rsrq - stats["rsrq_mean"]) / (std + eps)
+
+                    combined = math.sqrt(rsrp_z**2 + rsrq_z**2)
+
+                    if not stats:
+                        combined = min_anomaly_score + 2.0
+                        rsrp_z = z_threshold + 1.0
+
+                    if combined >= min_anomaly_score:
+                        zscore_flagged = True
+
+                    neighbor_details.append({
+                        "nid": nid, "rsrp": rsrp, "rsrq": rsrq,
+                        "rsrp_z": rsrp_z, "rsrq_z": rsrq_z,
+                        "score": combined,
+                    })
+
+                if not rrcf_flagged and not zscore_flagged:
+                    continue
+
+                anomaly = Anomaly(
+                    run=run,
+                    serving_cell_id=sid,
+                    row_index=row_idx,
+                    datetime_raw=dt_val,
+                    avg_codisp=round(avg_codisp, 4),
+                    threshold=round(threshold, 4),
+                    rrcf_flagged=rrcf_flagged,
+                    zscore_flagged=zscore_flagged,
+                )
+                anomaly_objs.append(anomaly)
+
+        Anomaly.objects.bulk_create(anomaly_objs, batch_size=1000)
+
+        created = list(Anomaly.objects.filter(run=run).order_by("id"))
+
+        detail_idx = 0
+        with open(check_file, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            header_map = {h.strip().lower(): h for h in (reader.fieldnames or [])}
+            serving_col = self._resolve_column("serving_cell_id", header_map)
+            enodeb_col = self._resolve_column("enodebid", header_map)
+            cellid_col = self._resolve_column("cellid", header_map)
+            nbr_id_cols = [self._resolve_column(f"nbr_cell_{i}_id", header_map) for i in range(1, 5)]
+            nbr_rp_cols = [self._resolve_column(f"nbr_cell_{i}_rsrp", header_map) for i in range(1, 5)]
+            nbr_rq_cols = [self._resolve_column(f"nbr_cell_{i}_rsrq", header_map) for i in range(1, 5)]
+
+            anomaly_by_row = {a.row_index: a for a in created}
+
+            for row_idx, row in enumerate(reader):
+                if row_idx not in anomaly_by_row:
+                    continue
+                anomaly = anomaly_by_row[row_idx]
+                sid = anomaly.serving_cell_id
+                model = models.get(sid)
+
+                for i in range(4):
+                    id_col = nbr_id_cols[i]
+                    rp_col = nbr_rp_cols[i]
+                    rq_col = nbr_rq_cols[i]
+
+                    nid = row.get(id_col, "").strip() if id_col else ""
+                    if not nid or nid in ("", "nan", "NaN"):
+                        continue
+                    nid = nid.split(".")[0]
+
+                    try:
+                        rsrp = float(row.get(rp_col, "")) if rp_col else None
+                    except (ValueError, TypeError):
+                        rsrp = None
+                    try:
+                        rsrq = float(row.get(rq_col, "")) if rq_col else None
+                    except (ValueError, TypeError):
+                        rsrq = None
+
+                    stats = (model.neighbor_stats or {}).get(nid, {}) if model else {}
+                    rsrp_z = rsrq_z = 0.0
+                    eps = 1e-6
+
+                    if rsrp is not None and stats.get("rsrp_mean") is not None:
+                        rsrp_z = abs(rsrp - stats["rsrp_mean"]) / ((stats.get("rsrp_std", 0) or eps) + eps)
+                    if rsrq is not None and stats.get("rsrq_mean") is not None:
+                        rsrq_z = abs(rsrq - stats["rsrq_mean"]) / ((stats.get("rsrq_std", 0) or eps) + eps)
+
+                    import math
+                    combined = math.sqrt(rsrp_z**2 + rsrq_z**2)
+                    if not stats:
+                        combined = min_anomaly_score + 2.0
+                        rsrp_z = z_threshold + 1.0
+
+                    detail_objs.append(NeighborAnomalyDetail(
+                        anomaly=anomaly,
+                        serving_cell_id=sid,
+                        neighbor_id=nid,
+                        anomaly_score=round(combined, 4),
+                        rsrp=round(rsrp, 1) if rsrp is not None else None,
+                        rsrq=round(rsrq, 1) if rsrq is not None else None,
+                        rsrp_z=round(rsrp_z, 4),
+                        rsrq_z=round(rsrq_z, 4),
+                    ))
+
+        if detail_objs:
+            NeighborAnomalyDetail.objects.bulk_create(detail_objs, batch_size=1000)
+
+        return {
+            "rows_scanned": rows_scanned,
+            "anomalies": len(created),
+            "cells_scanned": len(cells_seen),
+        }
+
+    def _detect_synthetic_fallback(self, run, threshold_mult):
+        """Fallback: generate synthetic anomalies if CSV parsing fails."""
+        serving_cells = list(
+            CellModel.objects.values_list("serving_cell_id", flat=True)[:10]
+        ) or ["41301_12845", "41301_12846", "41301_33901"]
+
+        base_time = timezone.now() - timedelta(hours=2)
+        objs = []
+        for i in range(random.randint(20, 50)):
+            cell = random.choice(serving_cells)
+            mean_c = random.uniform(3.0, 8.0)
+            std_c = random.uniform(1.0, 3.0)
+            threshold = mean_c + threshold_mult * std_c
+            rrcf_flag = random.random() < 0.7
+            avg_codisp = threshold + random.uniform(0.5, 10.0) if rrcf_flag else threshold - random.uniform(0.1, 1.0)
+            objs.append(Anomaly(
+                run=run, serving_cell_id=cell, row_index=i,
+                datetime_raw=base_time + timedelta(minutes=random.randint(0, 120)),
+                avg_codisp=round(avg_codisp, 4), threshold=round(threshold, 4),
+                rrcf_flagged=rrcf_flag, zscore_flagged=random.random() < 0.5,
+            ))
+        Anomaly.objects.bulk_create(objs)
+        run.status = "completed"
+        run.completed_at = timezone.now()
+        run.total_anomalies = len(objs)
+        run.total_cells_scanned = len(set(a.serving_cell_id for a in objs))
+        run.total_rows_scanned = len(objs)
+
+    def _build_suspicious_neighbors(self, run):
+        """Aggregate NeighborAnomalyDetail into SuspiciousNeighbor records."""
+        agg = {}
+        for d in NeighborAnomalyDetail.objects.filter(anomaly__run=run):
+            if d.neighbor_id not in agg:
+                agg[d.neighbor_id] = {"score": 0, "count": 0, "cells": set()}
+            agg[d.neighbor_id]["score"] += d.anomaly_score
+            agg[d.neighbor_id]["count"] += 1
+            agg[d.neighbor_id]["cells"].add(d.serving_cell_id)
+
+        for nbr_id, data in agg.items():
+            SuspiciousNeighbor.objects.create(
+                run=run, neighbor_id=nbr_id,
+                sum_score=round(data["score"], 4),
+                occurrence_count=data["count"],
+                affected_serving_cells=sorted(data["cells"]),
+            )
+
+    def _build_windows(self, run):
+        """Build DetectedWindow and AbnormalNeighbor from anomaly clusters."""
+        suspicious = SuspiciousNeighbor.objects.filter(
+            run=run, sum_score__gte=20
+        )
+        for sn in suspicious:
+            details = NeighborAnomalyDetail.objects.filter(
+                anomaly__run=run, neighbor_id=sn.neighbor_id
+            ).select_related("anomaly")
+            if details.count() < 3:
+                continue
+            times = sorted([
+                d.anomaly.datetime_raw for d in details
+                if d.anomaly.datetime_raw
+            ])
+            if not times:
+                continue
+            affected = set(d.serving_cell_id for d in details)
+            for cell in list(affected)[:5]:
+                cell_count = details.filter(serving_cell_id=cell).count()
+                DetectedWindow.objects.create(
+                    run=run, serving_cell_id=cell, neighbor_id=sn.neighbor_id,
+                    window_start=times[0], window_end=times[-1],
+                    event_count=cell_count,
+                )
+                AbnormalNeighbor.objects.create(
+                    run=run, serving_cell_id=cell, neighbor_id=sn.neighbor_id,
+                    event_count=cell_count, window_count=1,
+                )
 
     # ==================================================================
     # DEMO — TRAINING
@@ -530,7 +642,13 @@ class MLBridge:
     def _run_training_demo(
         self, train_file, num_trees, tree_size, min_samples
     ):
-        """Generate fake CellModel records in DB."""
+        """
+        Process the uploaded CSV to build CellModel records in demo mode.
+
+        Reads serving_cell_id and neighbor columns from the CSV, computes
+        real per-cell statistics, and creates/updates CellModel entries.
+        Falls back to synthetic data only if the CSV cannot be parsed.
+        """
         run_id = f"demo_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         run = TrainingRun.objects.create(
@@ -543,6 +661,175 @@ class MLBridge:
             min_samples=min_samples,
         )
 
+        cells_trained = 0
+        error_msg = ""
+
+        try:
+            cells_trained = self._parse_csv_and_build_models(
+                train_file, num_trees, tree_size, min_samples
+            )
+            error_msg = f"Demo mode — parsed {train_file} and built {cells_trained} cell models."
+        except Exception as e:
+            logger.warning("CSV parse failed (%s), falling back to synthetic data", e)
+            cells_trained = self._build_synthetic_models(num_trees, tree_size)
+            error_msg = f"Demo mode — CSV parse failed ({e}), used synthetic data."
+
+        run.status = "completed"
+        run.completed_at = timezone.now()
+        run.total_cells_trained = cells_trained
+        run.error_log = error_msg
+        run.save()
+
+        logger.info("DEMO training complete: %s (%d cells)", run_id, cells_trained)
+        return run
+
+    # Column aliases: maps normalized name → list of raw dataset alternatives
+    COLUMN_ALIASES = {
+        "serving_cell_id": ["serving_cell_id"],
+        "nbr_cell_1_id": ["nbr_cell_1_id", "eutrancellid1"],
+        "nbr_cell_2_id": ["nbr_cell_2_id", "eutrancellid2"],
+        "nbr_cell_3_id": ["nbr_cell_3_id", "eutrancellid3"],
+        "nbr_cell_4_id": ["nbr_cell_4_id", "eutrancellid4"],
+        "nbr_cell_1_rsrp": ["nbr_cell_1_rsrp", "avg_dlrsrp_d1"],
+        "nbr_cell_2_rsrp": ["nbr_cell_2_rsrp", "avg_dlrsrp_d2"],
+        "nbr_cell_3_rsrp": ["nbr_cell_3_rsrp", "avg_dlrsrp_d3"],
+        "nbr_cell_4_rsrp": ["nbr_cell_4_rsrp", "avg_dlrsrp_d4"],
+        "nbr_cell_1_rsrq": ["nbr_cell_1_rsrq", "avg_dlrsrq_d1"],
+        "nbr_cell_2_rsrq": ["nbr_cell_2_rsrq", "avg_dlrsrq_d2"],
+        "nbr_cell_3_rsrq": ["nbr_cell_3_rsrq", "avg_dlrsrq_d3"],
+        "nbr_cell_4_rsrq": ["nbr_cell_4_rsrq", "avg_dlrsrq_d4"],
+        "enodebid": ["enodebid"],
+        "cellid": ["cellid"],
+    }
+
+    def _resolve_column(self, target, header_map):
+        """Find the actual CSV column name for a target field, checking aliases."""
+        for alias in self.COLUMN_ALIASES.get(target, [target]):
+            if alias.lower() in header_map:
+                return header_map[alias.lower()]
+        return None
+
+    def _compute_serving_cell_id(self, row, serving_col, enodeb_col, cellid_col):
+        """Get serving_cell_id — directly or computed from enodebid*256+cellid."""
+        if serving_col:
+            val = row.get(serving_col, "").strip()
+            if val:
+                return val.split(".")[0]
+
+        if enodeb_col and cellid_col:
+            try:
+                enb = int(float(row.get(enodeb_col, "")))
+                cid = int(float(row.get(cellid_col, "")))
+                return str(enb * 256 + cid)
+            except (ValueError, TypeError):
+                pass
+        return ""
+
+    def _parse_csv_and_build_models(
+        self, train_file, num_trees, tree_size, min_samples
+    ):
+        """Read the uploaded CSV and build real CellModel records from its data."""
+        import statistics
+
+        cell_data = defaultdict(lambda: {
+            "rows": 0,
+            "neighbors": defaultdict(lambda: {"rsrp": [], "rsrq": []}),
+        })
+
+        with open(train_file, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            header_map = {h.strip().lower(): h for h in (reader.fieldnames or [])}
+
+            serving_col = self._resolve_column("serving_cell_id", header_map)
+            enodeb_col = self._resolve_column("enodebid", header_map)
+            cellid_col = self._resolve_column("cellid", header_map)
+
+            if not serving_col and not (enodeb_col and cellid_col):
+                raise ValueError(
+                    "CSV needs 'serving_cell_id' or 'enodebid'+'cellid' columns"
+                )
+
+            nbr_id_cols = [self._resolve_column(f"nbr_cell_{i}_id", header_map) for i in range(1, 5)]
+            nbr_rp_cols = [self._resolve_column(f"nbr_cell_{i}_rsrp", header_map) for i in range(1, 5)]
+            nbr_rq_cols = [self._resolve_column(f"nbr_cell_{i}_rsrq", header_map) for i in range(1, 5)]
+
+            for row in reader:
+                sid = self._compute_serving_cell_id(row, serving_col, enodeb_col, cellid_col)
+                if not sid:
+                    continue
+                cell_data[sid]["rows"] += 1
+
+                for i in range(4):
+                    id_col = nbr_id_cols[i]
+                    rp_col = nbr_rp_cols[i]
+                    rq_col = nbr_rq_cols[i]
+
+                    nid = row.get(id_col, "").strip() if id_col else ""
+                    if not nid or nid in ("", "nan", "NaN"):
+                        continue
+                    nid = nid.split(".")[0]
+
+                    try:
+                        rsrp = float(row.get(rp_col, "")) if rp_col else None
+                    except (ValueError, TypeError):
+                        rsrp = None
+                    try:
+                        rsrq = float(row.get(rq_col, "")) if rq_col else None
+                    except (ValueError, TypeError):
+                        rsrq = None
+
+                    if rsrp is not None:
+                        cell_data[sid]["neighbors"][nid]["rsrp"].append(rsrp)
+                    if rsrq is not None:
+                        cell_data[sid]["neighbors"][nid]["rsrq"].append(rsrq)
+
+        cells_built = 0
+        for sid, data in cell_data.items():
+            if data["rows"] < min_samples:
+                continue
+
+            neighbor_order = sorted(data["neighbors"].keys())
+            K = len(neighbor_order)
+            if K == 0:
+                continue
+
+            neighbor_stats = {}
+            for nid in neighbor_order:
+                nd = data["neighbors"][nid]
+                rp = nd["rsrp"]
+                rq = nd["rsrq"]
+                neighbor_stats[nid] = {
+                    "rsrp_mean": round(statistics.mean(rp), 2) if rp else -85.0,
+                    "rsrp_std": round(statistics.stdev(rp), 2) if len(rp) > 1 else 5.0,
+                    "rsrq_mean": round(statistics.mean(rq), 2) if rq else -10.0,
+                    "rsrq_std": round(statistics.stdev(rq), 2) if len(rq) > 1 else 2.5,
+                }
+
+            mean_codisp = round(random.uniform(3.0, 8.0), 4)
+            std_codisp = round(random.uniform(1.0, 3.0), 4)
+
+            CellModel.objects.update_or_create(
+                serving_cell_id=sid,
+                defaults={
+                    "K": K,
+                    "mean_codisp": mean_codisp,
+                    "std_codisp": std_codisp,
+                    "training_rows": data["rows"],
+                    "neighbor_order": neighbor_order,
+                    "neighbor_stats": neighbor_stats,
+                    "num_trees": num_trees,
+                    "tree_size": tree_size,
+                },
+            )
+            cells_built += 1
+
+        if cells_built == 0:
+            raise ValueError(f"No cells met min_samples={min_samples} threshold")
+
+        return cells_built
+
+    def _build_synthetic_models(self, num_trees, tree_size):
+        """Fallback: generate synthetic CellModel records."""
         demo_cells = [
             "41301_12845", "41301_12846", "41301_12847",
             "41301_33901", "41301_33902", "41301_44510",
@@ -559,7 +846,6 @@ class MLBridge:
         for cell_id in demo_cells:
             K = random.randint(4, 10)
             neighbors = random.sample(all_neighbors, min(K, len(all_neighbors)))
-
             neighbor_stats = {}
             for nbr in neighbors:
                 neighbor_stats[nbr] = {
@@ -568,7 +854,6 @@ class MLBridge:
                     "rsrq_mean": round(random.uniform(-14, -6), 2),
                     "rsrq_std": round(random.uniform(1.5, 4.0), 2),
                 }
-
             CellModel.objects.update_or_create(
                 serving_cell_id=cell_id,
                 defaults={
@@ -582,15 +867,7 @@ class MLBridge:
                     "tree_size": tree_size,
                 },
             )
-
-        run.status = "completed"
-        run.completed_at = timezone.now()
-        run.total_cells_trained = len(demo_cells)
-        run.error_log = "Demo mode — no actual training executed."
-        run.save()
-
-        logger.info("DEMO training complete: %s (%d cells)", run_id, len(demo_cells))
-        return run
+        return len(demo_cells)
 
     # ==================================================================
     # DEMO — MODEL STATUS

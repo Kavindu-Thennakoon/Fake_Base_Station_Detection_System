@@ -78,13 +78,13 @@ export default function FileUpload({ onUploaded, accentColor = "var(--accent-blu
         {result.headers_valid ? (
           <div className="flex items-center gap-2 mt-3 text-xs text-[var(--accent-green)]">
             <CheckCircle size={14} />
-            Headers validated — ready for processing
+            Headers validated ({result.schema_detected === "raw_dataset" ? "raw dataset format" : "normalized format"}) — ready for processing
           </div>
         ) : (
           <div className="mt-3 text-xs">
             <div className="flex items-center gap-2 text-[var(--accent-yellow)]">
               <AlertCircle size={14} />
-              Some expected headers missing (file may still work)
+              Unrecognized header format — file may not be compatible
             </div>
             {result.missing_headers.length > 0 && (
               <p className="text-[var(--text-secondary)] mt-1 ml-5">

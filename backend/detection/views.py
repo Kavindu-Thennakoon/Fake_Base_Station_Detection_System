@@ -1,7 +1,9 @@
 import os
 import csv
+from collections import defaultdict
 
 from django.conf import settings
+from django.db.models import Avg, Count, Sum, Max, Min, F
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -13,6 +15,7 @@ from detection.models import (
     TrainingRun,
     CellModel,
     Anomaly,
+    NeighborAnomalyDetail,
     SuspiciousNeighbor,
     DetectedWindow,
     AbnormalNeighbor,
@@ -32,6 +35,7 @@ from detection.serializers import (
 )
 from detection.services.ml_bridge import MLBridge
 from detection.services.explainability import ExplainabilityService
+from alerts.models import Alert
 
 
 class StandardResultsPagination(PageNumberPagination):
@@ -297,9 +301,252 @@ def neighbor_risk_profile(request, neighbor_id):
     return Response(result)
 
 
-EXPECTED_MR_HEADERS = {
-    "serving_cell_id", "datetime_raw", "neighbor_id", "rsrp", "rsrq",
-}
+@api_view(["GET"])
+def suspicious_neighbors_list(request):
+    """
+    GET /api/detection/suspicious-neighbors/?run_id=...&severity=...&search=...&page=1&page_size=50
+    Paginated list of suspicious neighbors with severity classification.
+    """
+    run_id = request.query_params.get("run_id")
+    severity = request.query_params.get("severity")
+    search = request.query_params.get("search", "").strip()
+
+    qs = SuspiciousNeighbor.objects.select_related("run").all().order_by("-sum_score")
+    if run_id:
+        qs = qs.filter(run__run_id=run_id)
+    if search:
+        qs = qs.filter(neighbor_id__icontains=search)
+
+    if severity:
+        from django.db.models import Q, Case, When, CharField
+        if severity == "critical":
+            qs = qs.filter(Q(sum_score__gte=50) | Q(occurrence_count__gte=100))
+        elif severity == "high":
+            qs = qs.filter(
+                Q(sum_score__gte=20, sum_score__lt=50, occurrence_count__lt=100) |
+                Q(occurrence_count__gte=50, occurrence_count__lt=100, sum_score__lt=50)
+            )
+        elif severity == "medium":
+            qs = qs.filter(
+                Q(sum_score__gte=10, sum_score__lt=20, occurrence_count__lt=50) |
+                Q(occurrence_count__gte=20, occurrence_count__lt=50, sum_score__lt=10)
+            )
+        elif severity == "low":
+            qs = qs.filter(sum_score__lt=10, occurrence_count__lt=20)
+
+    total = qs.count()
+
+    page = int(request.query_params.get("page", 1))
+    page_size = int(request.query_params.get("page_size", 50))
+    start = (page - 1) * page_size
+    end = start + page_size
+
+    results = []
+    for sn in qs[start:end]:
+        s = sn.sum_score
+        if s >= 50 or sn.occurrence_count >= 100:
+            sev = "critical"
+        elif s >= 20 or sn.occurrence_count >= 50:
+            sev = "high"
+        elif s >= 10 or sn.occurrence_count >= 20:
+            sev = "medium"
+        else:
+            sev = "low"
+
+        results.append({
+            "id": sn.id,
+            "neighbor_id": sn.neighbor_id,
+            "sum_score": round(sn.sum_score, 4),
+            "occurrence_count": sn.occurrence_count,
+            "affected_serving_cells": sn.affected_serving_cells,
+            "affected_cells_count": len(sn.affected_serving_cells) if sn.affected_serving_cells else 0,
+            "severity": sev,
+            "run_id": sn.run.run_id,
+            "run_pk": sn.run.pk,
+        })
+
+    return Response({
+        "count": total,
+        "page": page,
+        "page_size": page_size,
+        "results": results,
+    })
+
+
+@api_view(["GET"])
+def neighbor_detail(request, neighbor_id):
+    """
+    GET /api/detection/neighbors/{neighbor_id}/detail/?run_id=...
+    Full detail page data for a single suspicious neighbor.
+    """
+    run_id = request.query_params.get("run_id")
+
+    details_qs = NeighborAnomalyDetail.objects.filter(
+        neighbor_id=str(neighbor_id)
+    ).select_related("anomaly", "anomaly__run")
+
+    if run_id:
+        details_qs = details_qs.filter(anomaly__run__run_id=run_id)
+
+    if not details_qs.exists():
+        return Response(
+            {"error": f"No records for neighbor {neighbor_id}"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    total_score = 0
+    total_count = details_qs.count()
+    serving_cells_map = defaultdict(lambda: {
+        "count": 0, "rsrp_sum": 0, "rsrq_sum": 0,
+        "rsrp_z_sum": 0, "rsrq_z_sum": 0,
+        "rsrp_values": [], "rsrq_values": [],
+        "rsrp_z_values": [], "rsrq_z_values": [],
+        "score_sum": 0, "in_baseline": False,
+    })
+    runs_seen = set()
+    mr_records = []
+
+    for d in details_qs.order_by("-anomaly_score")[:500]:
+        total_score += d.anomaly_score
+        runs_seen.add(d.anomaly.run.run_id)
+        cell = serving_cells_map[d.serving_cell_id]
+        cell["count"] += 1
+        cell["score_sum"] += d.anomaly_score
+        if d.rsrp is not None:
+            cell["rsrp_sum"] += d.rsrp
+            cell["rsrp_values"].append(d.rsrp)
+        if d.rsrq is not None:
+            cell["rsrq_sum"] += d.rsrq
+            cell["rsrq_values"].append(d.rsrq)
+        if d.rsrp_z is not None:
+            cell["rsrp_z_sum"] += d.rsrp_z
+            cell["rsrp_z_values"].append(d.rsrp_z)
+        if d.rsrq_z is not None:
+            cell["rsrq_z_sum"] += d.rsrq_z
+            cell["rsrq_z_values"].append(d.rsrq_z)
+
+        mr_records.append({
+            "anomaly_id": d.anomaly.id,
+            "row_index": d.anomaly.row_index,
+            "serving_cell_id": d.serving_cell_id,
+            "avg_codisp": round(d.anomaly.avg_codisp, 4),
+            "threshold": round(d.anomaly.threshold, 4),
+            "rrcf_flagged": d.anomaly.rrcf_flagged,
+            "zscore_flagged": d.anomaly.zscore_flagged,
+            "detection_method": d.anomaly.detection_method,
+            "datetime_raw": d.anomaly.datetime_raw.isoformat() if d.anomaly.datetime_raw else None,
+            "rsrp": d.rsrp,
+            "rsrq": d.rsrq,
+            "rsrp_z": round(d.rsrp_z, 4) if d.rsrp_z is not None else None,
+            "rsrq_z": round(d.rsrq_z, 4) if d.rsrq_z is not None else None,
+            "anomaly_score": round(d.anomaly_score, 4),
+        })
+
+    affected_cells = []
+    for cell_id, data in serving_cells_map.items():
+        n = data["count"]
+        try:
+            cm = CellModel.objects.get(serving_cell_id=cell_id)
+            in_baseline = str(neighbor_id) in (cm.neighbor_order or [])
+            baseline_stats = (cm.neighbor_stats or {}).get(str(neighbor_id))
+        except CellModel.DoesNotExist:
+            in_baseline = False
+            baseline_stats = None
+
+        affected_cells.append({
+            "serving_cell_id": cell_id,
+            "count": n,
+            "avg_rsrp": round(data["rsrp_sum"] / len(data["rsrp_values"]), 2) if data["rsrp_values"] else None,
+            "avg_rsrq": round(data["rsrq_sum"] / len(data["rsrq_values"]), 2) if data["rsrq_values"] else None,
+            "avg_rsrp_z": round(data["rsrp_z_sum"] / len(data["rsrp_z_values"]), 2) if data["rsrp_z_values"] else None,
+            "avg_rsrq_z": round(data["rsrq_z_sum"] / len(data["rsrq_z_values"]), 2) if data["rsrq_z_values"] else None,
+            "avg_score": round(data["score_sum"] / n, 4),
+            "in_baseline": in_baseline,
+            "baseline_stats": baseline_stats,
+        })
+    affected_cells.sort(key=lambda x: x["count"], reverse=True)
+
+    if total_score >= 50 or total_count >= 100:
+        severity = "critical"
+    elif total_score >= 20 or total_count >= 50:
+        severity = "high"
+    elif total_score >= 10 or total_count >= 20:
+        severity = "medium"
+    else:
+        severity = "low"
+
+    in_any_baseline = any(c["in_baseline"] for c in affected_cells)
+
+    alert = Alert.objects.filter(neighbor_id=str(neighbor_id)).order_by("-created_at").first()
+    alert_info = None
+    if alert:
+        alert_info = {
+            "id": alert.id,
+            "severity": alert.severity,
+            "status": alert.status,
+            "created_at": alert.created_at.isoformat(),
+        }
+
+    svc = ExplainabilityService()
+    risk_profile = svc.get_neighbor_risk_profile(neighbor_id)
+
+    rsrp_all = []
+    rsrq_all = []
+    rsrp_z_all = []
+    rsrq_z_all = []
+    for data in serving_cells_map.values():
+        rsrp_all.extend(data["rsrp_values"])
+        rsrq_all.extend(data["rsrq_values"])
+        rsrp_z_all.extend(data["rsrp_z_values"])
+        rsrq_z_all.extend(data["rsrq_z_values"])
+
+    signal_summary = {
+        "rsrp_min": round(min(rsrp_all), 2) if rsrp_all else None,
+        "rsrp_max": round(max(rsrp_all), 2) if rsrp_all else None,
+        "rsrp_avg": round(sum(rsrp_all) / len(rsrp_all), 2) if rsrp_all else None,
+        "rsrq_min": round(min(rsrq_all), 2) if rsrq_all else None,
+        "rsrq_max": round(max(rsrq_all), 2) if rsrq_all else None,
+        "rsrq_avg": round(sum(rsrq_all) / len(rsrq_all), 2) if rsrq_all else None,
+        "rsrp_z_avg": round(sum(rsrp_z_all) / len(rsrp_z_all), 2) if rsrp_z_all else None,
+        "rsrq_z_avg": round(sum(rsrq_z_all) / len(rsrq_z_all), 2) if rsrq_z_all else None,
+    }
+
+    return Response({
+        "neighbor_id": str(neighbor_id),
+        "total_score": round(total_score, 4),
+        "occurrence_count": total_count,
+        "affected_cells_count": len(affected_cells),
+        "runs_count": len(runs_seen),
+        "severity": severity,
+        "in_any_baseline": in_any_baseline,
+        "signal_summary": signal_summary,
+        "affected_cells": affected_cells,
+        "mr_records": mr_records,
+        "alert": alert_info,
+        "risk_profile": risk_profile if "error" not in risk_profile else None,
+    })
+
+
+HEADER_SCHEMAS = [
+    {
+        "name": "normalized",
+        "required": {"serving_cell_id", "nbr_cell_1_id", "nbr_cell_1_rsrp"},
+    },
+    {
+        "name": "raw_dataset",
+        "required": {"enodebid", "cellid", "eutrancellid1", "avg_dlrsrp_d1"},
+    },
+]
+
+
+def _validate_csv_headers(header_set):
+    for schema in HEADER_SCHEMAS:
+        if schema["required"].issubset(header_set):
+            return True, schema["name"], []
+    all_options = " OR ".join(
+        ", ".join(sorted(s["required"])) for s in HEADER_SCHEMAS
+    )
+    return False, None, [f"Need one of: {all_options}"]
 
 
 @api_view(["POST"])
@@ -308,7 +555,7 @@ def upload_csv(request):
     """
     POST /api/detection/upload/
     Upload a CSV file for detection or training.
-    Validates CSV headers, saves to MEDIA_ROOT/uploads/, returns file path + row count.
+    Validates CSV headers against known schemas (normalized or raw dataset format).
     """
     ser = CSVUploadSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
@@ -341,14 +588,14 @@ def upload_csv(request):
         pass
 
     header_set = set(headers)
-    missing = EXPECTED_MR_HEADERS - header_set
-    has_expected = len(missing) == 0
+    is_valid, schema_name, messages = _validate_csv_headers(header_set)
 
     return Response({
         "file_path": dest_path,
         "file_name": os.path.basename(dest_path),
         "row_count": row_count,
         "headers": headers,
-        "headers_valid": has_expected,
-        "missing_headers": sorted(missing) if missing else [],
+        "headers_valid": is_valid,
+        "schema_detected": schema_name or "unknown",
+        "missing_headers": messages,
     }, status=status.HTTP_201_CREATED)

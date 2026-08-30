@@ -193,13 +193,13 @@ export default function Dashboard() {
           <div className="space-y-3">
             {alerts.length > 0 ? (
               alerts.slice(0, 5).map((alert) => (
-                <div key={alert.id} className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-primary)]">
+                <Link key={alert.id} to={`/neighbors/${alert.neighbor_id}`} className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-primary)] hover:bg-[var(--bg-card-hover)] transition-colors">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">{alert.title}</p>
-                    <p className="text-xs text-[var(--text-secondary)]">Cell: {alert.neighbor_id}</p>
+                    <p className="text-xs text-[var(--text-secondary)]">Neighbor: {alert.neighbor_id}</p>
                   </div>
                   <SeverityBadge severity={alert.severity} />
-                </div>
+                </Link>
               ))
             ) : (
               <p className="text-[var(--text-secondary)] text-sm text-center py-6">No active alerts</p>

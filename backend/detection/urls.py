@@ -8,6 +8,8 @@ from detection.views import (
     AnomalyViewSet,
     model_status,
     neighbor_risk_profile,
+    neighbor_detail,
+    suspicious_neighbors_list,
     upload_csv,
 )
 
@@ -20,6 +22,12 @@ router.register(r"anomalies", AnomalyViewSet, basename="anomalies")
 urlpatterns = [
     path("", include(router.urls)),
     path("model-status/", model_status, name="model-status"),
+    path("suspicious-neighbors/", suspicious_neighbors_list, name="suspicious-neighbors-list"),
+    path(
+        "neighbors/<str:neighbor_id>/detail/",
+        neighbor_detail,
+        name="neighbor-detail",
+    ),
     path(
         "neighbors/<str:neighbor_id>/risk-profile/",
         neighbor_risk_profile,

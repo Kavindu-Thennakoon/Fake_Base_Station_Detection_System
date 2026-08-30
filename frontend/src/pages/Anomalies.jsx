@@ -1,26 +1,29 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { Shield, Brain, Filter, ChevronLeft, ChevronRight } from "lucide-react";
+import { Radio, Filter, ChevronLeft, ChevronRight, Search, AlertTriangle, ExternalLink } from "lucide-react";
+import SeverityBadge from "../components/SeverityBadge";
 import LoadingSpinner from "../components/LoadingSpinner";
-import { getAnomalies, getDetectionRuns } from "../services/api";
+import { getSuspiciousNeighbors, getDetectionRuns } from "../services/api";
 
-const METHODS = [
-  { value: "", label: "All Methods" },
-  { value: "both", label: "Both Layers" },
-  { value: "rrcf_only", label: "RRCF Only" },
-  { value: "zscore_only", label: "Z-Score Only" },
+const SEVERITIES = [
+  { value: "", label: "All Severities" },
+  { value: "critical", label: "Critical" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
 ];
 
 export default function Anomalies() {
-  const [anomalies, setAnomalies] = useState([]);
+  const [neighbors, setNeighbors] = useState([]);
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
 
   const [selectedRun, setSelectedRun] = useState("");
-  const [selectedCell, setSelectedCell] = useState("");
-  const [selectedMethod, setSelectedMethod] = useState("");
+  const [selectedSeverity, setSelectedSeverity] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchInput, setSearchInput] = useState("");
 
   useEffect(() => {
     getDetectionRuns()
@@ -31,57 +34,55 @@ export default function Anomalies() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = { page };
+      const params = { page, page_size: 50 };
       if (selectedRun) params.run_id = selectedRun;
-      if (selectedCell) params.cell_id = selectedCell;
-      const res = await getAnomalies(params);
-      const items = res.data.results || res.data;
-      setTotal(res.data.count || items.length);
-      setAnomalies(items);
+      if (selectedSeverity) params.severity = selectedSeverity;
+      if (searchTerm) params.search = searchTerm;
+      const res = await getSuspiciousNeighbors(params);
+      setTotal(res.data.count || 0);
+      setNeighbors(res.data.results || []);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [page, selectedRun, selectedCell]);
+  }, [page, selectedRun, selectedSeverity, searchTerm]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
-  const filtered =
-    selectedMethod
-      ? anomalies.filter((a) => a.detection_method === selectedMethod)
-      : anomalies;
-
-  const stats = {
-    total: total,
-    rrcf: anomalies.filter((a) => a.rrcf_flagged).length,
-    zscore: anomalies.filter((a) => a.zscore_flagged).length,
-    both: anomalies.filter((a) => a.rrcf_flagged && a.zscore_flagged).length,
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setSearchTerm(searchInput);
+    setPage(1);
   };
 
-  const cellIds = [...new Set(anomalies.map((a) => a.serving_cell_id))].sort();
+  const stats = {
+    total,
+    critical: neighbors.filter((n) => n.severity === "critical").length,
+    high: neighbors.filter((n) => n.severity === "high").length,
+    affectedCells: new Set(neighbors.flatMap((n) => n.affected_serving_cells || [])).size,
+  };
+
   const totalPages = Math.ceil(total / 50);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Shield size={24} className="text-[var(--accent-red)]" />
-          Anomalies
+          <Radio size={24} className="text-[var(--accent-red)]" />
+          Detected Abnormal Neighbors
         </h1>
         <p className="text-[var(--text-secondary)] text-sm mt-1">
-          All detected anomalies across detection runs
+          Suspicious neighbor cells ranked by anomaly score — potential Fake Base Stations
         </p>
       </div>
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MiniStat label="Total (this page)" value={stats.total} color="var(--accent-red)" />
-        <MiniStat label="RRCF Flagged" value={stats.rrcf} color="var(--accent-blue)" />
-        <MiniStat label="Z-Score Flagged" value={stats.zscore} color="var(--accent-orange)" />
-        <MiniStat label="Both Layers" value={stats.both} color="var(--accent-purple)" />
+        <MiniStat label="Total Suspicious" value={stats.total} color="var(--accent-red)" />
+        <MiniStat label="Critical" value={stats.critical} color="#ef4444" />
+        <MiniStat label="High" value={stats.high} color="var(--accent-orange)" />
+        <MiniStat label="Affected Cells (page)" value={stats.affectedCells} color="var(--accent-blue)" />
       </div>
 
       {/* Filters */}
@@ -97,29 +98,36 @@ export default function Anomalies() {
             <option key={r.run_id} value={r.run_id}>{r.run_id}</option>
           ))}
         </select>
-        <select
-          value={selectedCell}
-          onChange={(e) => { setSelectedCell(e.target.value); setPage(1); }}
-          className="px-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue)]"
-        >
-          <option value="">All Cells</option>
-          {cellIds.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        {METHODS.map((m) => (
+
+        {SEVERITIES.map((s) => (
           <button
-            key={m.value}
-            onClick={() => setSelectedMethod(m.value)}
+            key={s.value}
+            onClick={() => { setSelectedSeverity(s.value); setPage(1); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-              selectedMethod === m.value
+              selectedSeverity === s.value
                 ? "bg-[var(--accent-blue)] text-white"
                 : "bg-[var(--bg-card)] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-white"
             }`}
           >
-            {m.label}
+            {s.label}
           </button>
         ))}
+
+        <form onSubmit={handleSearch} className="flex items-center gap-2 ml-auto">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-secondary)]" />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search neighbor ID..."
+              className="pl-8 pr-3 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-color)] text-white text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-blue)] w-48"
+            />
+          </div>
+          <button type="submit" className="px-3 py-1.5 rounded-lg bg-[var(--accent-blue)] text-white text-xs font-medium">
+            Search
+          </button>
+        </form>
       </div>
 
       {/* Table */}
@@ -130,39 +138,56 @@ export default function Anomalies() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-[var(--border-color)]">
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">ID</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Cell ID</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">CoDisp Score</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Threshold</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Method</th>
-                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Time</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Neighbor ID</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Anomaly Score</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Occurrences</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Affected Cells</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Severity</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--text-secondary)] uppercase">Run</th>
                 <th className="px-5 py-3" />
               </tr>
             </thead>
             <tbody>
-              {filtered.length > 0 ? (
-                filtered.map((a) => (
-                  <tr key={a.id} className="border-b border-[var(--border-color)] hover:bg-[var(--bg-card-hover)] transition-colors">
-                    <td className="px-5 py-3 text-sm text-white">#{a.id}</td>
-                    <td className="px-5 py-3 text-sm font-mono text-white">{a.serving_cell_id}</td>
-                    <td className="px-5 py-3 text-sm font-semibold text-[var(--accent-red)]">{a.avg_codisp?.toFixed(3)}</td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">{a.threshold?.toFixed(3)}</td>
-                    <td className="px-5 py-3">
-                      <MethodBadge method={a.detection_method} />
+              {neighbors.length > 0 ? (
+                neighbors.map((n) => (
+                  <tr key={n.id} className="border-b border-[var(--border-color)] hover:bg-[var(--bg-card-hover)] transition-colors">
+                    <td className="px-5 py-3 text-sm font-mono font-semibold text-white">{n.neighbor_id}</td>
+                    <td className="px-5 py-3 text-sm font-semibold text-[var(--accent-red)]">
+                      {n.sum_score >= 1000000
+                        ? `${(n.sum_score / 1000000).toFixed(2)}M`
+                        : n.sum_score >= 1000
+                        ? `${(n.sum_score / 1000).toFixed(1)}K`
+                        : n.sum_score.toFixed(2)}
                     </td>
-                    <td className="px-5 py-3 text-xs text-[var(--text-secondary)]">
-                      {a.datetime_raw ? new Date(a.datetime_raw).toLocaleString() : "—"}
+                    <td className="px-5 py-3 text-sm text-white font-medium">{n.occurrence_count}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-white font-medium">{n.affected_cells_count}</span>
+                        <span className="text-xs text-[var(--text-secondary)]">
+                          {n.affected_cells_count === 1 ? "cell" : "cells"}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-5 py-3">
-                      <Link to={`/anomalies/${a.id}`} className="flex items-center gap-1 text-[var(--accent-purple)] hover:text-purple-300 text-sm">
-                        <Brain size={14} /> Explain
+                      <SeverityBadge severity={n.severity} />
+                    </td>
+                    <td className="px-5 py-3 text-xs text-[var(--text-secondary)] font-mono">{n.run_id?.split("_").slice(-2).join("_")}</td>
+                    <td className="px-5 py-3">
+                      <Link
+                        to={`/neighbors/${n.neighbor_id}`}
+                        className="flex items-center gap-1 text-[var(--accent-purple)] hover:text-purple-300 text-sm font-medium"
+                      >
+                        <ExternalLink size={14} /> Details
                       </Link>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-[var(--text-secondary)]">No anomalies match current filters.</td>
+                  <td colSpan={7} className="text-center py-16 text-[var(--text-secondary)]">
+                    <AlertTriangle size={40} className="mx-auto mb-3 opacity-30" />
+                    <p>No suspicious neighbors match current filters.</p>
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -202,24 +227,10 @@ function MiniStat({ label, value, color }) {
   return (
     <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl p-4">
       <p className="text-xs text-[var(--text-secondary)]">{label}</p>
-      <p className="text-2xl font-bold text-white mt-1">{value}</p>
+      <p className="text-2xl font-bold text-white mt-1">{typeof value === "number" ? value.toLocaleString() : value}</p>
       <div className="mt-2 h-1 rounded-full bg-[var(--bg-secondary)]">
         <div className="h-full rounded-full" style={{ background: color, width: "60%" }} />
       </div>
     </div>
-  );
-}
-
-function MethodBadge({ method }) {
-  const cls =
-    method === "both"
-      ? "bg-purple-500/20 text-purple-400"
-      : method === "rrcf_only"
-      ? "bg-blue-500/20 text-blue-400"
-      : "bg-orange-500/20 text-orange-400";
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>
-      {method?.replace("_", " ")}
-    </span>
   );
 }
